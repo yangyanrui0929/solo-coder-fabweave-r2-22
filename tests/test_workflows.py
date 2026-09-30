@@ -171,6 +171,22 @@ def test_maintenance_assignment_combines_both_clocks_and_planned_window():
     assert "planned_maintenance_overlap" in assignment_decision(policy, 50, 10, 60, TimeBox(70, 80), [TimeBox(75, 90)]).reasons
 
 
+def test_maintenance_assignment_treats_touching_windows_as_free():
+    policy = MaintenancePolicy(1, run_interval=100, calendar_interval=100)
+    touching = assignment_decision(policy, 0, 10, 10, TimeBox(20, 30), [TimeBox(10, 20), TimeBox(30, 40)])
+    assert touching.allowed
+    overlapping = assignment_decision(policy, 0, 10, 10, TimeBox(19, 30), [TimeBox(10, 20)])
+    assert overlapping.reasons == ("planned_maintenance_overlap",)
+
+
+def test_maintenance_assignment_reports_run_and_calendar_clocks():
+    policy = MaintenancePolicy(2, run_interval=100, calendar_interval=50)
+    decision = assignment_decision(policy, 10, 30, 40, TimeBox(50, 60), [])
+    assert decision.allowed
+    assert decision.evidence["run_hours"] == 30 and decision.evidence["run_hours_remaining"] == 70
+    assert decision.evidence["calendar_hours"] == 30 and decision.evidence["calendar_hours_remaining"] == 20
+
+
 def test_chamber_matching_rejects_missing_non_finite_and_outside_parameters():
     tolerances = {"pressure": Tolerance(absolute=1), "flow": Tolerance(relative=0.1)}
     reasons = mismatch_reasons({"pressure": 10, "flow": 100}, {"pressure": 12}, tolerances)
@@ -288,6 +304,19 @@ def test_reserve_qualified_is_fail_closed_and_then_atomic():
 def test_qualified_assignment_combines_maintenance_and_recipe_state():
     decision = qualified_assignment(MaintenancePolicy(1, 100, 100), 0, 1, 10, TimeBox(20, 30), [], "T", "C", 2, [Qualification("T", "C", 2, 0, 40)])
     assert decision.allowed and decision.evidence["recipe_revision"] == 2
+
+
+def test_qualified_assignment_preserves_qualification_rejection():
+    decision = qualified_assignment(MaintenancePolicy(1, 100, 100), 0, 1, 10, TimeBox(20, 30), [], "T", "C", 2, [])
+    assert not decision.allowed and decision.reasons == ("qualification_missing",)
+
+
+def test_qualified_assignment_returns_clocks_together_with_rejections():
+    policy = MaintenancePolicy(1, run_interval=100, calendar_interval=50)
+    qualifications = [Qualification("T", "C", 2, 0, 15)]
+    decision = qualified_assignment(policy, 0, 120, 60, TimeBox(20, 30), [], "T", "C", 2, qualifications)
+    assert decision.reasons == ("run_hour_maintenance_due", "calendar_maintenance_due", "qualification_inactive")
+    assert decision.evidence["run_hours"] == 120 and decision.evidence["calendar_hours"] == 60
 
 
 def test_sample_evaluation_keeps_selected_membership_with_spc_rules():
